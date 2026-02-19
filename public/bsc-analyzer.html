@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BSC 代币分析工具</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <nav class="bg-white shadow-sm p-4">
+    <div class="container mx-auto flex justify-between items-center">
+      <a href="/index.html" class="text-xl font-bold">← 返回</a>
+      <button id="logoutBtn" class="text-red-500">登出</button>
+    </div>
+  </nav>
+
+  <div class="container mx-auto p-6">
+    <h1 class="text-2xl font-bold mb-6">BSC 代币分析工具</h1>
+    
+    <div class="bg-white p-6 rounded-lg shadow mb-6">
+      <h2 class="text-xl font-bold mb-4">获取持有人</h2>
+      <div class="flex gap-2">
+        <input 
+          type="text" 
+          id="tokenAddress" 
+          placeholder="代币合约地址 (0x...)"
+          class="flex-1 px-3 py-2 border rounded"
+        >
+        <button id="fetchBtn" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">
+          获取
+        </button>
+      </div>
+      <div id="status" class="mt-4 text-sm text-gray-600"></div>
+    </div>
+
+    <div id="results" class="bg-white p-6 rounded-lg shadow hidden">
+      <h2 class="text-xl font-bold mb-4">持有人列表 (<span id="holderCount">0</span>)</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead>
+            <tr class="border-b">
+              <th class="text-left p-2">地址</th>
+              <th class="text-right p-2">余额</th>
+            </tr>
+          </thead>
+          <tbody id="holdersTable"></tbody>
+        </table>
+      </div>
+      <div class="mt-4">
+        <button id="downloadBtn" class="bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600">
+          下载 CSV
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('token');
+    if (!token) window.location.href = '/login.html';
+
+    let currentHolders = [];
+    let currentToken = '';
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      localStorage.removeItem('token');
+      window.location.href = '/login.html';
+    });
+
+    document.getElementById('fetchBtn').addEventListener('click', async () => {
+      const address = document.getElementById('tokenAddress').value.trim();
+      if (!address) return alert('请输入代币地址');
+
+      const status = document.getElementById('status');
+      const results = document.getElementById('results');
+      const table = document.getElementById('holdersTable');
+      const fetchBtn = document.getElementById('fetchBtn');
+
+      status.textContent = '正在获取持有人数据，请稍候...';
+      results.classList.add('hidden');
+      fetchBtn.disabled = true;
+      fetchBtn.textContent = '获取中...';
+
+      try {
+        const res = await fetch('/api/holders', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ tokenAddress: address })
+        });
+
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+
+        currentHolders = data.holders;
+        currentToken = address;
+
+        table.innerHTML = data.holders.map(h => `
+          <tr class="border-b hover:bg-gray-50">
+            <td class="p-2 font-mono text-sm">${h.TokenHolderAddress}</td>
+            <td class="p-2 text-right">${h.TokenHolderQuantity}</td>
+          </tr>
+        `).join('');
+
+        document.getElementById('holderCount').textContent = data.holders.length;
+        results.classList.remove('hidden');
+        status.textContent = `成功获取 ${data.holders.length} 个持有人`;
+      } catch (err) {
+        status.textContent = '错误: ' + err.message;
+        status.classList.add('text-red-600');
+      } finally {
+        fetchBtn.disabled = false;
+        fetchBtn.textContent = '获取';
+      }
+    });
+
+    document.getElementById('downloadBtn').addEventListener('click', () => {
+      if (currentHolders.length === 0) return;
+
+      const csv = [
+        'Address,Balance',
+        ...currentHolders.map(h => `${h.TokenHolderAddress},${h.TokenHolderQuantity}`)
+      ].join('\n');
+
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `holders_${currentToken}_${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>
